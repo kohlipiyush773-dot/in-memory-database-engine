@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PageDB - buffer-managed database engine</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <div class="logo">P</div>
+    <div><div class="title">PageDB</div><div class="sub">In-memory database engine with OS-style page replacement</div></div>
+  </div>
+  <div class="status">
+    <span class="pill" id="hdr-policy" title="page replacement policy">policy -</span>
+    <span class="pill" id="hdr-frames" title="buffer pool size">- frames</span>
+    <span class="pill" id="hdr-hit" title="buffer hit ratio since start">hit -</span>
+    <span class="pill" id="hdr-wal" title="write-ahead log: durable bytes / total bytes">WAL -</span>
+    <span class="pill" id="hdr-txn" title="transaction state">no txn</span>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-tab="sql" class="on">SQL Console <small>DBMS</small></button>
+  <button data-tab="pool">Buffer Pool <small>OS + DBMS</small></button>
+  <button data-tab="storage">Storage &amp; Index <small>DBMS</small></button>
+  <button data-tab="os">Page Replacement Lab <small>OS</small></button>
+  <button data-tab="tx">Transactions &amp; Recovery <small>DBMS</small></button>
+  <button data-tab="bench">Benchmark <small>OS + DBMS</small></button>
+  <button data-tab="concepts">Concept Map</button>
+</nav>
+
+<main>
+<!-- ============================================================ SQL -->
+<section id="tab-sql" class="tab on">
+  <div class="cols side-left">
+    <aside class="card">
+      <h3>Tables</h3>
+      <div id="sql-tables" class="muted">loading...</div>
+      <div class="btnrow">
+        <button class="btn" id="btn-seed100">+100 students</button>
+        <button class="btn" id="btn-seed1000">+1000 students</button>
+      </div>
+      <h3>Try these</h3>
+      <div id="sql-samples" class="chips"></div>
+    </aside>
+    <div>
+      <div class="card">
+        <textarea id="sql-input" spellcheck="false" placeholder="Write SQL here - Ctrl+Enter runs it">SELECT * FROM students WHERE id = 42</textarea>
+        <div class="btnrow">
+          <button class="btn primary" id="btn-run">Run (Ctrl+Enter)</button>
+          <button class="btn" id="btn-explain">Explain plan</button>
+          <span class="sep"></span>
+          <button class="btn" id="btn-begin">BEGIN</button>
+          <button class="btn" id="btn-commit">COMMIT</button>
+          <button class="btn" id="btn-rollback">ROLLBACK</button>
+        </div>
+      </div>
+      <div id="sql-out" class="card"><div class="muted">Results appear here. Every statement also shows how many buffer-pool hits, misses and disk I/Os it caused.</div></div>
+      <div class="card"><h3>History</h3><div id="sql-history" class="history muted">nothing yet</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ POOL -->
+<section id="tab-pool" class="tab">
+  <div class="card">
+    <div class="btnrow wrap">
+      <label>Policy <select id="pool-policy"><option>LRU</option><option>CLOCK</option><option>FIFO</option></select></label>
+      <label>Frames <input id="pool-frames" type="number" min="8" max="512" value="16"></label>
+      <button class="btn primary" id="btn-apply">Apply</button>
+      <span class="sep"></span>
+      <button class="btn" id="btn-flush">Flush dirty pages</button>
+      <button class="btn" id="btn-ckpt">Checkpoint</button>
+      <button class="btn" id="btn-pool-refresh">Refresh</button>
+      <span class="sep"></span>
+      <button class="btn accent" id="btn-replay">Replay last statement</button>
+      <label>speed <select id="replay-speed"><option value="300">slow</option><option value="140" selected>normal</option><option value="35">fast</option></select></label>
+    </div>
+    <p class="hint">Each box is a <b>frame</b> (4 KB of RAM). Colour = state: <span class="lg clean"></span>clean &nbsp;<span class="lg dirty"></span>dirty (changed in RAM, not on disk) &nbsp;<span class="lg empty"></span>empty. <b>R</b> = reference bit (Clock), <b>PIN</b> = in use, cannot be evicted.</p>
+  </div>
+  <div class="cols two">
+    <div class="card"><h3>Frames (the buffer pool)</h3><div id="pool-grid" class="grid"></div></div>
+    <div>
+      <div class="card"><h3>Statistics</h3><div id="pool-stats"></div></div>
+      <div class="card"><h3>Event feed</h3><div id="pool-feed" class="feed muted">run a query, then press "Replay last statement"</div></div>
+    </div>
+  </div>
+  <div class="card"><h3>Page table (page &rarr; frame, with the OS-style bits)</h3><div id="pool-pt" class="scroll"></div></div>
+</section>
+
+<!-- ============================================================ STORAGE -->
+<section id="tab-storage" class="tab">
+  <div class="card">
+    <div class="btnrow wrap">
+      <label>Table <select id="st-table"></select></label>
+      <button class="btn" id="btn-st-refresh">Refresh</button>
+      <span class="sep"></span>
+      <label>Look up key <input id="st-key" type="number" value="42" style="width:90px"></label>
+      <button class="btn primary" id="btn-lookup">Trace index lookup</button>
+    </div>
+    <div id="st-lookup-info" class="hint">Pick a key to see which index pages a lookup touches, compared with scanning the whole table.</div>
+  </div>
+  <div class="card"><h3>B+ tree index (each box = one 4 KB page, kept in the buffer pool)</h3><div id="st-tree" class="scroll tree"></div>
+    <div class="hint">Bright box = page currently in RAM, dim = only on disk. Leaves are linked left-to-right for range scans. Max 8 keys per node so that splits are easy to see.</div></div>
+  <div class="cols two">
+    <div class="card"><h3>Heap file pages of the table</h3><div id="st-heap" class="blocks"></div><div id="st-page"></div></div>
+    <div class="card"><h3>Database file: page N is at byte N &times; 4096</h3><div id="st-disk" class="disk"></div>
+      <div class="hint legend"><span class="sw heap"></span>heap <span class="sw leaf"></span>index leaf <span class="sw node"></span>index node <span class="sw meta"></span>catalog <span class="sw free"></span>unused &nbsp; outline = in RAM, dot = dirty</div></div>
+  </div>
+</section>
+
+<!-- ============================================================ OS LAB -->
+<section id="tab-os" class="tab">
+  <div class="card">
+    <div class="btnrow wrap">
+      <label>Reference string <input id="os-refs" style="width:340px" value="7 0 1 2 0 3 0 4 2 3 0 3 2 1 2 0 1 7 0 1"></label>
+      <label>Frames <input id="os-frames" type="number" min="1" max="12" value="3" style="width:60px"></label>
+      <label>Policy <select id="os-policy"><option>FIFO</option><option selected>LRU</option><option>CLOCK</option><option>OPT</option></select></label>
+      <button class="btn primary" id="btn-trace">Run</button>
+      <button class="btn" id="btn-compare">Compare all 4</button>
+      <button class="btn accent" id="btn-belady">Belady's anomaly</button>
+    </div>
+    <div class="chips" id="os-presets"></div>
+    <p class="hint">This runs the <b>real</b> BufferPoolManager and replacers from the C++ engine on your reference string (no separate simulation code). A page that is not in a frame causes a <b>page fault</b>.</p>
+  </div>
+  <div id="os-out"></div>
+  <div id="os-belady"></div>
+  <div class="cols four" id="os-info"></div>
+</section>
+
+<!-- ============================================================ TX -->
+<section id="tab-tx" class="tab">
+  <div class="cols two">
+    <div>
+      <div class="card">
+        <h3>Guided demos</h3>
+        <div class="btnrow wrap" id="tx-demos"></div>
+        <div id="tx-stepper" class="stepper muted">Choose a demo. Each step is explained and then executed on the real engine.</div>
+      </div>
+      <div class="card"><h3>What happened</h3><div id="tx-steps" class="steps muted">-</div></div>
+    </div>
+    <div>
+      <div class="card">
+        <h3>Controls</h3>
+        <div class="btnrow wrap">
+          <button class="btn danger" id="btn-crash">Crash now (kill -9)</button>
+          <button class="btn" id="btn-flush2">Flush dirty pages</button>
+          <button class="btn" id="btn-ckpt2">Checkpoint</button>
+          <button class="btn" id="btn-reset">Reset database</button>
+        </div>
+        <p class="hint"><b>Crash</b> kills the engine process without writing anything: the buffer pool and the unflushed log tail vanish. The server restarts it and the engine recovers from the write-ahead log.</p>
+      </div>
+      <div class="card"><h3>Last crash recovery</h3><div id="tx-recovery" class="muted">no recovery has run yet</div></div>
+      <div class="card"><h3>Write-ahead log</h3><div id="tx-wal" class="scroll"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ BENCH -->
+<section id="tab-bench" class="tab">
+  <div class="card">
+    <div class="formgrid">
+      <label>Database size (pages)<input id="b-pages" type="number" value="1000" min="50" max="20000"></label>
+      <label>Page accesses<input id="b-ops" type="number" value="20000" min="1000" max="200000"></label>
+      <label>Writes (%)<input id="b-wp" type="number" value="20" min="0" max="100"></label>
+    </div>
+    <div class="checks"><b>Buffer sizes:</b> <span id="b-sizes"></span></div>
+    <div class="checks"><b>Workloads:</b> <span id="b-wl"></span></div>
+    <div class="checks"><b>Policies:</b> <span id="b-pol"></span></div>
+    <div class="btnrow"><button class="btn primary" id="btn-bench">Run benchmark</button>
+      <button class="btn" id="btn-csv" disabled>Download CSV</button><span id="b-status" class="muted"></span></div>
+  </div>
+  <div id="bench-charts" class="cols two"></div>
+  <div id="bench-eat"></div>
+  <div id="bench-table"></div>
+  <div class="card">
+    <h3>Index vs sequential scan, and cold vs warm cache</h3>
+    <div class="btnrow"><button class="btn primary" id="btn-ivs">Run experiment</button><span class="muted" id="ivs-status"></span></div>
+    <div id="ivs-out"></div>
+  </div>
+</section>
+
+<!-- ============================================================ CONCEPTS -->
+<section id="tab-concepts" class="tab"></section>
+</main>
+<div id="toasts"></div>
+
+<script src="util.js"></script>
+<script src="tab_sql.js"></script>
+<script src="tab_pool.js"></script>
+<script src="tab_storage.js"></script>
+<script src="tab_os.js"></script>
+<script src="tab_tx.js"></script>
+<script src="tab_bench.js"></script>
+<script src="tab_concepts.js"></script>
+<script src="main.js"></script>
+</body>
+</html>
